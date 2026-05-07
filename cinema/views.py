@@ -1,4 +1,6 @@
+from django.db.models import Count, F
 from rest_framework import viewsets
+from rest_framework.pagination import PageNumberPagination
 
 from cinema.models import Genre, Actor, CinemaHall, Movie, MovieSession, Order
 
@@ -45,12 +47,18 @@ class MovieViewSet(viewsets.ModelViewSet):
         qs = self.queryset
         actors = self.request.query_params.get("actors")
         if actors:
-            actors_id = [int(actor_id) for actor_id in actors.split(",") if actor_id.isdigit()]
+            actors_id = [
+                int(actor_id) for actor_id in actors.split(",")
+                if actor_id.isdigit()
+            ]
             qs = qs.filter(actors__id__in=actors_id)
 
         genres = self.request.query_params.get("genres")
         if genres:
-            genres_id = [int(genre_id) for genre_id in genres.split(",") if genre_id.isdigit()]
+            genres_id = [
+                int(genre_id) for genre_id in genres.split(",")
+                if genre_id.isdigit()
+            ]
             qs = qs.filter(genres__id__in=genres_id)
 
         title = self.request.query_params.get("title")
@@ -86,21 +94,33 @@ class MovieSessionViewSet(viewsets.ModelViewSet):
         if date:
             qs = qs.filter(show_time__date=date)
 
-        if self.action in ("list", "retrieve"):
+        if self.action == "list":
+            qs = qs.select_related("movie", "cinema_hall").annotate(
+                tickets_available=F(
+                    "cinema_hall__rows"
+                ) * F(
+                    "cinema_hall__seats_in_row"
+                ) - Count("tickets")
+            )
+            return qs
+
+        if self.action == "retrieve":
             return qs.select_related("movie", "cinema_hall")
         return qs
-
-
 
 
 class OrderViewSet(viewsets.ModelViewSet):
     queryset = Order.objects.all()
     serializer_class = OrderSerializer
+    pagination_class = PageNumberPagination
 
     def get_queryset(self):
         qs = self.queryset.filter(user=self.request.user)
         if self.action in ("list", "retrieve"):
-            return qs.prefetch_related("tickets__movie_session__movie", "tickets__movie_session__cinema_hall")
+            return qs.prefetch_related(
+                "tickets__movie_session__movie",
+                "tickets__movie_session__cinema_hall"
+            )
         return qs
 
     def perform_create(self, serializer):
